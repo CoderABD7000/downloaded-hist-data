@@ -1,25 +1,13 @@
 """
 btc_intraday_delta_adx.py
 
-New intraday BTC strategy, built from validated components only:
-  - Signal: delta + ADX ONLY (the single best-performing pair from our
-    own 5-year ablation test across all 6 possible combinations --
-    outperformed the full 4-factor blend on every metric: PnL, drawdown,
-    AND trade count).
-  - 15-minute candles (matches the ablation test exactly, so results
-    are directly comparable).
-  - Fixed stop/target: $165 stop / $250 target (1:1.5 R:R, same ratio
-    already validated on BTC_LIVE_TRADER).
-  - Position size: 1 BTC.
-  - Single position at a time -- no concurrency, no portfolio-level
-    profit-lock override. This deliberately tests whether the raw
-    delta+ADX signal has real edge on its own.
-  - Same dedup/cooldown state machine already validated across every
-    other backtest in this project.
+New intraday BTC strategy, built from validated components only.
+SL/TP/position size are now CLI-configurable (see bottom of file) so
+different combinations can be tested without editing the code.
 
 USAGE:
-    python btc_intraday_delta_adx.py
-    python btc_intraday_delta_adx.py --days 365
+    python btc_intraday_delta_adx.py --sl 165 --tp 250
+    python btc_intraday_delta_adx.py --sl 400 --tp 750
 """
 
 import argparse
@@ -32,9 +20,9 @@ DEFAULT_PARQUET = r"D:\data\btc\BTCUSDT_1m_ohlcv_oi_delta_cvd_5y.parquet"
 
 WEIGHTS = dict(delta=8, adx=35)
 TH = dict(adx_period=14, adx_min=18, buy=58, sell=42, min_gap=6, cooldown=2, pressure_smooth=3)
-SL_USDT = 165.0
-TP_USDT = 250.0
-POSITION_SIZE_BTC = 1.0
+SL_USDT = None
+TP_USDT = None
+POSITION_SIZE_BTC = None
 
 
 def load_and_resample_15m(parquet_path: str, days=None) -> pd.DataFrame:
@@ -235,7 +223,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--parquet", type=str, default=DEFAULT_PARQUET)
     parser.add_argument("--days", type=int, default=None)
+    parser.add_argument("--sl", type=float, default=165.0, help="Stop-loss distance in USDT")
+    parser.add_argument("--tp", type=float, default=250.0, help="Take-profit distance in USDT")
+    parser.add_argument("--size", type=float, default=1.0, help="Position size in BTC")
     args = parser.parse_args()
+
+    SL_USDT = args.sl
+    TP_USDT = args.tp
+    POSITION_SIZE_BTC = args.size
 
     bars = load_and_resample_15m(args.parquet, args.days)
     trades = run_backtest(bars)
