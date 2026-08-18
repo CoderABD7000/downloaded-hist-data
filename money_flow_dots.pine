@@ -18,7 +18,10 @@ indicator("Money Flow Dots + Daily VWAP (MRP)", overlay=true, max_labels_count=5
 // ============================================================
 
 fadeLookback = input.int(1, "Fade comparison lookback (candles)", minval=1)
-dotSize = input.string("tiny", "Dot size", options=["tiny","small","normal"])
+dotSize = input.string("tiny", "Dot size", options=["tiny","small"])
+startTime = input.time(timestamp("UTC", 2026, 8, 10, 18, 0), "Window start")
+endTime = input.time(timestamp("UTC", 2026, 8, 11, 19, 0), "Window end")
+inWindow = time >= startTime and time <= endTime
 
 // ---- Per-candle buy/sell dominance from up/down volume proxy ----
 bodyRange = high - low
@@ -35,17 +38,18 @@ sameDirection = (dominance > 0 and domPrev > 0) or (dominance < 0 and domPrev < 
 weaker = math.abs(dominance) < math.abs(domPrev)
 isFading = sameDirection and weaker
 
-sz = dotSize == "tiny" ? size.tiny : dotSize == "small" ? size.small : size.normal
+sz = dotSize == "tiny" ? size.tiny : size.small
 
-if isFading
-    label.new(bar_index, isGreen ? low : high, "●", style=isGreen ? label.style_label_up : label.style_label_down,
-               color=color.new(color.black,0), textcolor=color.black, size=sz, yloc=isGreen ? yloc.belowbar : yloc.abovebar)
-else if isGreen
-    label.new(bar_index, low, "●", style=label.style_label_up, color=color.new(color.green,0),
-               textcolor=color.green, size=sz, yloc=yloc.belowbar)
-else if isRed
-    label.new(bar_index, high, "●", style=label.style_label_down, color=color.new(color.red,0),
-               textcolor=color.red, size=sz, yloc=yloc.abovebar)
+if inWindow
+    if isFading
+        label.new(bar_index, isGreen ? low : high, "", style=label.style_circle,
+                   color=color.new(color.black,0), size=sz, yloc=isGreen ? yloc.belowbar : yloc.abovebar)
+    else if isGreen
+        label.new(bar_index, low, "", style=label.style_circle, color=color.new(color.green,0),
+                   size=sz, yloc=yloc.belowbar)
+    else if isRed
+        label.new(bar_index, high, "", style=label.style_circle, color=color.new(color.red,0),
+                   size=sz, yloc=yloc.abovebar)
 
 // ---- MRP = Daily Anchored VWAP ----
 var float cumPV = 0.0
