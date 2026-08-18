@@ -1,0 +1,62 @@
+//@version=5
+indicator("Money Flow Dots + Daily VWAP (MRP)", overlay=true, max_labels_count=500)
+
+// ============================================================
+// GREEN dot below candle  = money IN  (net buying pressure this candle)
+// RED dot above candle    = money OUT (net selling pressure this candle)
+// BLACK dot                = momentum FADING within a same-colored streak
+//                            (this candle's dominance is weaker than the
+//                            previous candle's, while still same direction)
+//
+// This is a transparent, documented implementation of the well-known
+// public technique (per-candle buy vs sell volume dominance), NOT a
+// reverse-engineered copy of any specific tool. Compare it visually
+// against your reference chart for the same window -- if it lines up,
+// that confirms the CONCEPT; exact dot-for-dot matching isn't the goal.
+//
+// MRP = Daily Anchored VWAP, resets at 00:00 exchange time.
+// ============================================================
+
+fadeLookback = input.int(1, "Fade comparison lookback (candles)", minval=1)
+dotSize = input.string("tiny", "Dot size", options=["tiny","small","normal"])
+
+// ---- Per-candle buy/sell dominance from up/down volume proxy ----
+bodyRange = high - low
+buyPressure = bodyRange > 0 ? ((close - low) / bodyRange) * volume : volume * 0.5
+sellPressure = volume - buyPressure
+dominance = bodyRange > 0 ? (buyPressure - sellPressure) / volume : 0.0
+
+isGreen = dominance > 0
+isRed = dominance < 0
+
+// ---- Fading detection: same direction as fadeLookback bars ago, but weaker ----
+domPrev = dominance[fadeLookback]
+sameDirection = (dominance > 0 and domPrev > 0) or (dominance < 0 and domPrev < 0)
+weaker = math.abs(dominance) < math.abs(domPrev)
+isFading = sameDirection and weaker
+
+sz = dotSize == "tiny" ? size.tiny : dotSize == "small" ? size.small : size.normal
+
+if isFading
+    label.new(bar_index, isGreen ? low : high, "●", style=isGreen ? label.style_label_up : label.style_label_down,
+               color=color.new(color.black,0), textcolor=color.black, size=sz, yloc=isGreen ? yloc.belowbar : yloc.abovebar)
+else if isGreen
+    label.new(bar_index, low, "●", style=label.style_label_up, color=color.new(color.green,0),
+               textcolor=color.green, size=sz, yloc=yloc.belowbar)
+else if isRed
+    label.new(bar_index, high, "●", style=label.style_label_down, color=color.new(color.red,0),
+               textcolor=color.red, size=sz, yloc=yloc.abovebar)
+
+// ---- MRP = Daily Anchored VWAP ----
+var float cumPV = 0.0
+var float cumVol = 0.0
+isNewDay = ta.change(time("D")) != 0
+if isNewDay
+    cumPV := 0.0
+    cumVol := 0.0
+typicalPrice = (high + low + close) / 3
+cumPV := cumPV + typicalPrice * volume
+cumVol := cumVol + volume
+mrp = cumVol > 0 ? cumPV / cumVol : na
+
+plot(mrp, title="MRP (Daily VWAP)", color=color.new(#7B3FF2, 0), linewidth=2)
