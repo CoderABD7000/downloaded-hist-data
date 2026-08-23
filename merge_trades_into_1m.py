@@ -9,6 +9,8 @@ timestamps have fractional-second precision; 1m candles don't).
   only to determine row color, not written as data).
 - LONG entry rows are highlighted green, SHORT entry rows red.
 - All 1m rows before the first trade's entry time are excluded.
+- Every original 1m column (taker buy volume, trade count, etc.) is
+  kept intact for future analysis.
 
 USAGE:
     python merge_trades_into_1m.py
@@ -166,8 +168,9 @@ def main():
     df = df.rename(columns={
         "timestamp": "Time", "open": "Open", "high": "High", "low": "Low",
         "close": "Close", "volume": "Volume", "entry_price": "Trade Entry Price",
+        "taker_buy_base": "Taker Buy Base", "taker_buy_quote": "Taker Buy Quote",
+        "trades": "Trade Count",
     })
-    df = df.drop(columns=["taker_buy_base", "taker_buy_quote", "trades"], errors="ignore")
 
     print(f"Writing {OUT_PATH} ...")
     with pd.ExcelWriter(OUT_PATH, engine="openpyxl") as writer:
