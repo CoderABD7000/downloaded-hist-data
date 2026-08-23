@@ -244,4 +244,234 @@ def run_full_pipeline(df1m_path: str, out_path: str):
     tsi_norm = ((tsi_val - tsi_signal).abs() / 10.0).clip(upper=1)
 
     rsi_val = compute_rsi(C, RSI_LEN)
-    dir_rsi = np.where(rsi_val > RSI_OB,
+    dir_rsi = np.where(rsi_val > RSI_OB, 1, np.where(rsi_val < RSI_OS, -1, 0))
+    rsi_signed_norm = np.where(rsi_val > RSI_OB, ((rsi_val - RSI_OB) / max(100 - RSI_OB, 0.0001)).clip(upper=1),
+                        np.where(rsi_val < RSI_OS, -((RSI_OS - rsi_val) / max(RSI_OS, 0.0001)).clip(upper=1), 0.0))
+
+    macd_line, macd_signal, macd_hist = compute_macd(C, MACD_FAST, MACD_SLOW, MACD_SIG)
+    macd_dir_up = macd_line > macd_signal
+    macd_norm = (macd_hist.abs() / (atr_val * 0.1 + 1e-10)).clip(upper=1)
+
+    dir_tsi = np.where(tsi_dir_up, 1, -1)
+    dir_macd = np.where(macd_dir_up, 1, -1)
+
+    votes_sum_mag = dir_tsi + dir_rsi + dir_macd
+    mom_direction_mag = np.sign(votes_sum_mag)
+    agree_count_mag = (dir_tsi == mom_direction_mag).astype(int) + (dir_rsi == mom_direction_mag).astype(int) + (dir_macd == mom_direction_mag).astype(int)
+    agreement_factor_mag = np.where(mom_direction_mag == 0, 0.0, agree_count_mag / 3.0)
+    sum_agree_mag = (np.where(dir_tsi == mom_direction_mag, tsi_norm, 0.0) +
+                     np.where(dir_rsi == mom_direction_mag, np.abs(rsi_signed_norm), 0.0) +
+                     np.where(dir_macd == mom_direction_mag, macd_norm, 0.0))
+    mom_magnitude_mag = np.where(agree_count_mag > 0, sum_agree_mag / np.where(agree_count_mag==0,1,agree_count_mag), 0.0)
+    momentum_score_raw_mag = np.where(mom_direction_mag == 0, 0.0, mom_magnitude_mag * agreement_factor_mag * 100.0)
+    momentum_mag_long = np.where(mom_direction_mag > 0, momentum_score_raw_mag, 0.0)
+    momentum_mag_short = np.where(mom_direction_mag < 0, momentum_score_raw_mag, 0.0)
+
+    tsi_turn_up = (tsi_val > tsi_signal) & (tsi_val.shift(1) <= tsi_signal.shift(1))
+    tsi_turn_down = (tsi_val < tsi_signal) & (tsi_val.shift(1) >= tsi_signal.shift(1))
+    rsi_turn_up = (rsi_val > 50) & (rsi_val.shift(1) <= 50)
+    rsi_turn_down = (rsi_val < 50) & (rsi_val.shift(1) >= 50)
+    macd_turn_up = (macd_line > macd_signal) & (macd_line.shift(1) <= macd_signal.shift(1))
+    macd_turn_down = (macd_line < macd_signal) & (macd_line.shift(1) >= macd_signal.shift(1))
+
+    tsi_up_age = barssince(tsi_turn_up.fillna(False))
+    tsi_dn_age = barssince(tsi_turn_down.fillna(False))
+    rsi_up_age = barssince(rsi_turn_up.fillna(False))
+    rsi_dn_age = barssince(rsi_turn_down.fillna(False))
+    macd_up_age = barssince(macd_turn_up.fillna(False))
+    macd_dn_age = barssince(macd_turn_down.fillna(False))
+
+    dir_tsi_turn = np.where(tsi_up_age < tsi_dn_age, 1, np.where(tsi_dn_age < tsi_up_age, -1, 0))
+    dir_rsi_turn = np.where(rsi_up_age < rsi_dn_age, 1, np.where(rsi_dn_age < rsi_up_age, -1, 0))
+    dir_macd_turn = np.where(macd_up_age < macd_dn_age, 1, np.where(macd_dn_age < macd_up_age, -1, 0))
+
+    tsi_turn_mag = np.where(dir_tsi_turn == 0, 0.0, np.clip(1.0 - np.minimum(tsi_up_age, tsi_dn_age) / TURN_LOOKBACK, 0, None))
+    rsi_turn_mag = np.where(dir_rsi_turn == 0, 0.0, np.clip(1.0 - np.minimum(rsi_up_age, rsi_dn_age) / TURN_LOOKBACK, 0, None))
+    macd_turn_mag = np.where(dir_macd_turn == 0, 0.0, np.clip(1.0 - np.minimum(macd_up_age, macd_dn_age) / TURN_LOOKBACK, 0, None))
+
+    votes_sum_turn = dir_tsi_turn + dir_rsi_turn + dir_macd_turn
+    mom_direction_turn = np.sign(votes_sum_turn)
+    agree_count_turn = (dir_tsi_turn == mom_direction_turn).astype(int) + (dir_rsi_turn == mom_direction_turn).astype(int) + (dir_macd_turn == mom_direction_turn).astype(int)
+    agreement_factor_turn = np.where(mom_direction_turn == 0, 0.0, agree_count_turn / 3.0)
+    sum_agree_turn = (np.where(dir_tsi_turn == mom_direction_turn, tsi_turn_mag, 0.0) +
+                      np.where(dir_rsi_turn == mom_direction_turn, rsi_turn_mag, 0.0) +
+                      np.where(dir_macd_turn == mom_direction_turn, macd_turn_mag, 0.0))
+    mom_magnitude_turn = np.where(agree_count_turn > 0, sum_agree_turn / np.where(agree_count_turn==0,1,agree_count_turn), 0.0)
+    momentum_score_raw_turn = np.where(mom_direction_turn == 0, 0.0, mom_magnitude_turn * agreement_factor_turn * 100.0)
+    momentum_turn_long = np.where(mom_direction_turn > 0, momentum_score_raw_turn, 0.0)
+    momentum_turn_short = np.where(mom_direction_turn < 0, momentum_score_raw_turn, 0.0)
+
+    momentum_long_score = np.minimum(momentum_mag_long + momentum_turn_long * MOMENTUM_BLEND, 100.0)
+    momentum_short_score = np.minimum(momentum_mag_short + momentum_turn_short * MOMENTUM_BLEND, 100.0)
+    mom_direction = np.where(momentum_long_score > momentum_short_score, 1,
+                     np.where(momentum_short_score > momentum_long_score, -1, 0))
+
+    # ---- Volatility ----
+    bb_mid, bb_upper, bb_lower = compute_bollinger(C, BB_LEN, BB_MULT)
+    atr_pct = atr_val / C * 100.0
+    expansion_cut = ATR_PCT_LOW + (ATR_PCT_HIGH - ATR_PCT_LOW) * 0.35
+    vol_regime = np.select(
+        [atr_pct < ATR_PCT_LOW, atr_pct > ATR_PCT_HIGH, atr_pct > expansion_cut],
+        ["LOW", "EXTREME", "EXPANSION"], default="NORMAL")
+    volatility_score = np.select(
+        [vol_regime == "LOW", vol_regime == "NORMAL", vol_regime == "EXPANSION"],
+        [15.0, 55.0, 90.0], default=(70.0 if ALLOW_EXTREME_VOL else 10.0))
+    volatility_blocks_signal = (vol_regime == "EXTREME") & (not ALLOW_EXTREME_VOL)
+
+    # ---- VWAP / Location (session-anchored, daily reset) ----
+    hlc3 = (H + L + C) / 3
+    day = df["timestamp"].dt.floor("D")
+    cum_pv = (V * hlc3).groupby(day).cumsum()
+    cum_v = V.groupby(day).cumsum()
+    cum_pv2 = (V * hlc3 * hlc3).groupby(day).cumsum()
+    vwap_val = cum_pv / cum_v
+    vwap_variance = (cum_pv2 / cum_v - vwap_val**2).clip(lower=0)
+    vwap_stdev = np.sqrt(vwap_variance)
+    vwap_sigma_dist = np.where(vwap_stdev > 0, (C - vwap_val) / vwap_stdev, 0.0)
+
+    above_vwap = C > vwap_val
+    extended_above = vwap_sigma_dist > VWAP_SIGMA2
+    extended_below = vwap_sigma_dist < -VWAP_SIGMA2
+    hyper_above = vwap_sigma_dist > VWAP_SIGMA3
+    hyper_below = vwap_sigma_dist < -VWAP_SIGMA3
+    ext_above_norm = np.clip((vwap_sigma_dist - VWAP_SIGMA1) / max(VWAP_SIGMA3 - VWAP_SIGMA1, 0.0001), 0, 1)
+    ext_below_norm = np.clip((-vwap_sigma_dist - VWAP_SIGMA1) / max(VWAP_SIGMA3 - VWAP_SIGMA1, 0.0001), 0, 1)
+
+    vwap_cont_long = np.where(above_vwap & trend_dir_up.values & (mom_direction > 0) & ~hyper_above, 60 + 40*(1-ext_above_norm), 0.0)
+    vwap_cont_short = np.where(~above_vwap.values & ~trend_dir_up.values & (mom_direction < 0) & ~hyper_below, 60 + 40*(1-ext_below_norm), 0.0)
+    vwap_rev_long = np.where(extended_below & (mom_direction >= 0), 50 + 50*ext_below_norm, 0.0)
+    vwap_rev_short = np.where(extended_above & (mom_direction <= 0), 50 + 50*ext_above_norm, 0.0)
+    vwap_long_score = np.maximum(vwap_cont_long, vwap_rev_long)
+    vwap_short_score = np.maximum(vwap_cont_short, vwap_rev_short)
+
+    # ---- Volume ----
+    rvol_avg = V.rolling(RVOL_LEN).mean()
+    rvol = np.where(rvol_avg > 0, V / rvol_avg, 1.0)
+    vol_class = np.select([rvol < RVOL_LOW, rvol > RVOL_EXTREME, rvol > RVOL_HIGH], ["LOW","EXTREME","HIGH"], default="NORMAL")
+    volume_score = np.select([vol_class=="LOW", vol_class=="NORMAL", vol_class=="HIGH"], [20.0,50.0,80.0], default=100.0)
+
+    # ---- Market Structure ----
+    ph, pl = pivothigh_pivotlow(H, L, PIVOT_LEN, PIVOT_LEN)
+    last_pivot_high = np.full(n, np.nan)
+    prev_pivot_high = np.full(n, np.nan)
+    last_pivot_low = np.full(n, np.nan)
+    prev_pivot_low = np.full(n, np.nan)
+    lph, pph, lpl, ppl = np.nan, np.nan, np.nan, np.nan
+    ph_v, pl_v = ph.values, pl.values
+    for i in range(n):
+        if not np.isnan(ph_v[i]):
+            pph = lph
+            lph = ph_v[i]
+        if not np.isnan(pl_v[i]):
+            ppl = lpl
+            lpl = pl_v[i]
+        last_pivot_high[i], prev_pivot_high[i] = lph, pph
+        last_pivot_low[i], prev_pivot_low[i] = lpl, ppl
+
+    higher_high = ~np.isnan(last_pivot_high) & ~np.isnan(prev_pivot_high) & (last_pivot_high > prev_pivot_high)
+    lower_high = ~np.isnan(last_pivot_high) & ~np.isnan(prev_pivot_high) & (last_pivot_high < prev_pivot_high)
+    higher_low = ~np.isnan(last_pivot_low) & ~np.isnan(prev_pivot_low) & (last_pivot_low > prev_pivot_low)
+    lower_low = ~np.isnan(last_pivot_low) & ~np.isnan(prev_pivot_low) & (last_pivot_low < prev_pivot_low)
+    bullish_structure = higher_high | higher_low
+    bearish_structure = lower_high | lower_low
+
+    bos_up = np.zeros(n, dtype=bool)
+    bos_down = np.zeros(n, dtype=bool)
+    Cv = C.values
+    for i in range(1, n):
+        if not np.isnan(last_pivot_high[i]) and Cv[i] > last_pivot_high[i] and Cv[i-1] <= last_pivot_high[i]:
+            bos_up[i] = True
+        if not np.isnan(last_pivot_low[i]) and Cv[i] < last_pivot_low[i] and Cv[i-1] >= last_pivot_low[i]:
+            bos_down[i] = True
+
+    structure_bias = np.full(n, "NONE", dtype=object)
+    bias = "NONE"
+    prior_bias_arr = np.full(n, "NONE", dtype=object)
+    for i in range(n):
+        prior_bias_arr[i] = bias
+        if bullish_structure[i]:
+            bias = "BULL"
+        elif bearish_structure[i]:
+            bias = "BEAR"
+        structure_bias[i] = bias
+
+    choch_up = bos_up & (prior_bias_arr == "BEAR")
+    choch_down = bos_down & (prior_bias_arr == "BULL")
+
+    structure_long_score = np.minimum((bullish_structure*40.0) + (bos_up*30.0) + (choch_up*30.0), 100.0)
+    structure_short_score = np.minimum((bearish_structure*40.0) + (bos_down*30.0) + (choch_down*30.0), 100.0)
+
+    # ---- Order Flow (disabled) ----
+    order_flow_long_score = np.zeros(n)
+    order_flow_short_score = np.zeros(n)
+
+    # ---- MTF ----
+    htf1_bias = compute_mtf_bias(df, HTF1, MTF_FAST_LEN, MTF_SLOW_LEN)
+    htf2_bias = compute_mtf_bias(df, HTF2, MTF_FAST_LEN, MTF_SLOW_LEN)
+    mtf_long_ok = (htf1_bias >= 0) & (htf2_bias >= 0)
+    mtf_short_ok = (htf1_bias <= 0) & (htf2_bias <= 0)
+
+    # ---- Score Engine ----
+    w_sum_raw = W_TREND + W_MOM + W_VOL + W_VWAP + W_VOLU + W_STRUCT + W_OF
+    w_sum = w_sum_raw if w_sum_raw > 0 else 100.0
+    nT, nM, nV, nVW, nVO, nS, nOF = [w/w_sum*100 for w in (W_TREND,W_MOM,W_VOL,W_VWAP,W_VOLU,W_STRUCT,W_OF)]
+
+    long_score = (trend_long_score*nT + momentum_long_score*nM + volatility_score*nV + vwap_long_score*nVW +
+                  volume_score*nVO + structure_long_score*nS + order_flow_long_score*nOF) / 100.0
+    short_score = (trend_short_score*nT + momentum_short_score*nM + volatility_score*nV + vwap_short_score*nVW +
+                   volume_score*nVO + structure_short_score*nS + order_flow_short_score*nOF) / 100.0
+
+    # ---- Signal Qualification ----
+    long_cond = ((long_score >= SCORE_THRESH) & (long_score > short_score) &
+                 (trend_long_score >= MIN_TREND_SCORE) & (momentum_long_score >= MIN_MOM_SCORE) &
+                 mtf_long_ok & ~volatility_blocks_signal)
+    short_cond = ((short_score >= SCORE_THRESH) & (short_score > long_score) &
+                  (trend_short_score >= MIN_TREND_SCORE) & (momentum_short_score >= MIN_MOM_SCORE) &
+                  mtf_short_ok & ~volatility_blocks_signal)
+
+    signal_state = np.full(n, "NONE", dtype=object)
+    new_long = np.zeros(n, dtype=bool)
+    new_short = np.zeros(n, dtype=bool)
+    state = "NONE"
+    for i in range(n):
+        if long_cond[i] and state != "LONG":
+            new_long[i] = True
+        if short_cond[i] and state != "SHORT":
+            new_short[i] = True
+        if long_cond[i]:
+            state = "LONG"
+        elif short_cond[i]:
+            state = "SHORT"
+        elif not long_cond[i] and not short_cond[i]:
+            state = "NONE"
+        signal_state[i] = state
+
+    out = df.copy()
+    out["trend_long_score"] = trend_long_score
+    out["trend_short_score"] = trend_short_score
+    out["momentum_long_score"] = momentum_long_score
+    out["momentum_short_score"] = momentum_short_score
+    out["volatility_score"] = volatility_score
+    out["vol_regime"] = vol_regime
+    out["vwap_long_score"] = vwap_long_score
+    out["vwap_short_score"] = vwap_short_score
+    out["volume_score"] = volume_score
+    out["structure_long_score"] = structure_long_score
+    out["structure_short_score"] = structure_short_score
+    out["long_score"] = long_score
+    out["short_score"] = short_score
+    out["mtf_long_ok"] = mtf_long_ok
+    out["mtf_short_ok"] = mtf_short_ok
+    out["signal_state"] = signal_state
+    out["new_long_signal"] = new_long
+    out["new_short_signal"] = new_short
+
+    out.to_parquet(out_path, index=False)
+    print(f"\nSaved {len(out):,} rows with all scores to {out_path}")
+    print(f"Total LONG signals: {new_long.sum()}")
+    print(f"Total SHORT signals: {new_short.sum()}")
+    return out
+
+
+if __name__ == "__main__":
+    run_full_pipeline(IN_PATH, OUT_PATH)
